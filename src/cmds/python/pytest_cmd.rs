@@ -344,7 +344,8 @@ fn parse_summary_line(summary: &str) -> PytestCounts {
 
 fn parse_duration(summary: &str) -> Option<String> {
     let unwrapped = summary.trim().trim_matches('=').trim();
-    let (_, duration) = unwrapped.rsplit_once(" in ")?;
+    let (_, duration_tail) = unwrapped.rsplit_once(" in ")?;
+    let duration = duration_tail.split_whitespace().next()?;
     let seconds = duration.strip_suffix('s')?;
     seconds.parse::<f64>().ok()?;
     Some(duration.to_string())
@@ -459,6 +460,13 @@ collected 0 items
         let output = "2 passed in 3.04s";
 
         assert_eq!(filter_pytest_output(output), "Pytest: 2 passed in 3.04s");
+    }
+
+    #[test]
+    fn test_filter_pytest_long_run_preserves_seconds_duration() {
+        let output = "2 passed in 65.12s (0:01:05)";
+
+        assert_eq!(filter_pytest_output(output), "Pytest: 2 passed in 65.12s");
     }
 
     #[test]
