@@ -32,7 +32,7 @@ LLM agent integration layer that installs, validates, and executes command-rewri
 | Codex | `rtk init --codex` | RTK.md + `.codex/hooks.json` (local) or `$CODEX_HOME/hooks.json` (global) | AGENTS.md + `PreToolUse` hook |
 | Cursor | `rtk init -g --agent cursor` | Cursor hook | hooks.json |
 | Trae | `rtk init --agent trae` (project) or `rtk init -g --agent trae` (global) | Native `rtk hook trae` registration | `.trae/hooks.json`; global also patches existing `~/.trae-cn/hooks.json` |
-| Google Antigravity | `rtk init --agent antigravity` / `rtk init -g --agent antigravity` | Antigravity Plugin in `plugins/rtk/` | plugin.json, hooks.json |
+| Google Antigravity | `rtk init --agent antigravity` / `rtk init -g --agent antigravity` | Antigravity Plugin in `plugins/rtk/` | plugin.json, hooks.json, rules/AGENTS.md (awareness) |
 | Pi | `rtk init --agent pi` | `.pi/extensions/rtk.ts` | -- |
 | Oh My Pi (OMP) | `rtk init --agent omp` | `.omp/extensions/rtk.ts` (shared Pi extension) | -- |
 | Hermes | `rtk init --agent hermes` | Python plugin in `~/.hermes/plugins/rtk-rewrite/` | `config.yaml` `plugins.enabled` |

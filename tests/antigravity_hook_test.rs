@@ -162,3 +162,81 @@ fn antigravity_hook_ignores_non_command_tools() {
     assert_eq!(v["decision"], "allow");
     assert!(v.get("overwrite").is_none());
 }
+
+/// Runs `rtk init` in `project` with an isolated HOME and closed stdin.
+fn run_init(project: &Path, home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rtk"))
+        .arg("init")
+        .args(args)
+        .current_dir(project)
+        .env("HOME", home)
+        .env("RTK_TELEMETRY_DISABLED", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to spawn rtk init")
+}
+
+#[test]
+fn antigravity_init_reports_rules_and_restart() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    let output = run_init(project.path(), home.path(), &["--agent", "antigravity"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Rules:  rules/AGENTS.md"), "{stdout}");
+    assert!(stdout.contains("Restart Antigravity"), "{stdout}");
+}
+
+#[test]
+fn antigravity_uninstall_with_nothing_installed_says_so() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    for args in [
+        &["--agent", "antigravity", "--uninstall"][..],
+        &["--agent", "antigravity", "--uninstall", "--dry-run"][..],
+    ] {
+        let output = run_init(project.path(), home.path(), args);
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("nothing to remove"), "{args:?}: {stdout}");
+        assert!(!stdout.contains("RTK uninstalled"), "{args:?}: {stdout}");
+    }
+}
+
+#[test]
+fn antigravity_dry_runs_change_nothing() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let plugin_dir = project.path().join(".agents/plugins/rtk");
+
+    let output = run_init(
+        project.path(),
+        home.path(),
+        &["--agent", "antigravity", "--dry-run"],
+    );
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("[dry-run] Nothing written."));
+    assert!(!plugin_dir.exists(), "install dry run must write nothing");
+
+    let output = run_init(project.path(), home.path(), &["--agent", "antigravity"]);
+    assert!(output.status.success());
+
+    let output = run_init(
+        project.path(),
+        home.path(),
+        &["--agent", "antigravity", "--uninstall", "--dry-run"],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[dry-run] would uninstall RTK for Google Antigravity:"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("[dry-run] Nothing written."), "{stdout}");
+    assert!(
+        plugin_dir.join("rules/AGENTS.md").is_file(),
+        "uninstall dry run must leave the plugin in place"
+    );
+}

@@ -28,13 +28,19 @@ pub const ANTIGRAVITY_HOOKS_JSON: &str = r#"{
 }
 "#;
 
+/// The awareness rules inside the plugin bundle. The plugin docs bundled with `agy`
+/// recommend `rules/AGENTS.md`: plain markdown, no frontmatter, always on while the
+/// plugin is enabled.
+const ANTIGRAVITY_RULES_FILE: &str = "AGENTS.md";
+
 pub fn run_antigravity_mode(global: bool, ctx: InitContext) -> Result<()> {
     if global {
         let home = dirs::home_dir().context("Could not determine user home directory")?;
         let base_dir = home.join(".gemini/config");
         run_antigravity_mode_at(&base_dir, true, ctx)
     } else {
-        run_antigravity_mode_at(&std::env::current_dir()?, false, ctx)
+        let cwd = std::env::current_dir().context("Failed to read current directory")?;
+        run_antigravity_mode_at(&cwd, false, ctx)
     }
 }
 
@@ -50,38 +56,64 @@ pub fn run_antigravity_mode_at(base_dir: &Path, global: bool, ctx: InitContext) 
 
     let plugin_json_path = plugin_dir.join("plugin.json");
     let hooks_json_path = plugin_dir.join("hooks.json");
+    // Rules under `rules/` apply whenever the plugin is active, as plain markdown
+    // with no frontmatter (Antigravity's plugin docs); `awareness.level` picks
+    // the text, as it does for every agent with a command hook.
+    let rules_dir = plugin_dir.join("rules");
+    let rules_path = rules_dir.join(ANTIGRAVITY_RULES_FILE);
+    let rules_content = awareness_content(ctx.awareness);
 
     if dry_run {
         println!(
             "[dry-run] would create plugin directory: {}",
             plugin_dir.display()
         );
-        println!("[dry-run] would write {}", plugin_json_path.display());
+        println!("[dry-run] would write {}", rules_path.display());
         println!("[dry-run] would write {}", hooks_json_path.display());
+        println!("[dry-run] would write {}", plugin_json_path.display());
         if verbose > 0 {
             println!(
                 "[dry-run] plugin.json content:\n{}",
                 ANTIGRAVITY_PLUGIN_JSON
             );
             println!("[dry-run] hooks.json content:\n{}", ANTIGRAVITY_HOOKS_JSON);
+            println!(
+                "[dry-run] rules/{ANTIGRAVITY_RULES_FILE} content:\n{}",
+                rules_content
+            );
         }
         print_dry_run_footer();
     } else {
-        fs::create_dir_all(&plugin_dir).context("Failed to create Antigravity plugin directory")?;
-        fs::write(&plugin_json_path, ANTIGRAVITY_PLUGIN_JSON)
-            .context("Failed to write Antigravity plugin.json")?;
-        fs::write(&hooks_json_path, ANTIGRAVITY_HOOKS_JSON)
+        fs::create_dir_all(&rules_dir).with_context(|| {
+            format!(
+                "Failed to create Antigravity plugin rules directory: {}",
+                rules_dir.display()
+            )
+        })?;
+        // plugin.json is what makes Antigravity discover the directory, so it goes last:
+        // a first install that fails halfway leaves no plugin rather than one missing its
+        // rules. A re-run over an existing plugin has no such guarantee.
+        atomic_write(&rules_path, rules_content)
+            .context("Failed to write Antigravity plugin rules")?;
+        atomic_write(&hooks_json_path, ANTIGRAVITY_HOOKS_JSON)
             .context("Failed to write Antigravity hooks.json")?;
+        atomic_write(&plugin_json_path, ANTIGRAVITY_PLUGIN_JSON)
+            .context("Failed to write Antigravity plugin.json")?;
 
         if verbose > 0 {
-            eprintln!("Wrote {}", plugin_json_path.display());
+            eprintln!("Wrote {}", rules_path.display());
             eprintln!("Wrote {}", hooks_json_path.display());
+            eprintln!("Wrote {}", plugin_json_path.display());
         }
 
         println!("\nRTK plugin configured for Google Antigravity.\n");
         println!("  Plugin: {} (installed)", plugin_dir.display());
         println!("  Hooks:  PreToolUse -> rtk hook antigravity");
-        println!("  Antigravity will now transparently rewrite commands to rtk.");
+        println!(
+            "  Rules:  rules/{ANTIGRAVITY_RULES_FILE} (awareness level: {})",
+            ctx.awareness
+        );
+        println!("  Restart Antigravity to load the plugin. Test with: git status");
         println!(
             "\n  Note: Antigravity checks permissions after hooks rewrite a command.\n  \
              If you use command allowlists, ensure `rtk` commands are permitted,\n  \
@@ -92,16 +124,38 @@ pub fn run_antigravity_mode_at(base_dir: &Path, global: bool, ctx: InitContext) 
     Ok(())
 }
 
-pub fn uninstall_antigravity_mode(global: bool, ctx: InitContext) -> Result<Vec<String>> {
-    if global {
-        let home = dirs::home_dir().context("Could not determine user home directory")?;
-        let base_dir = home.join(".gemini/config");
-        uninstall_antigravity_mode_at(&base_dir, true, ctx)
+pub fn uninstall_antigravity_mode(global: bool, ctx: InitContext) -> Result<()> {
+    let base_dir = if global {
+        dirs::home_dir()
+            .context("Could not determine user home directory")?
+            .join(".gemini/config")
     } else {
-        uninstall_antigravity_mode_at(&std::env::current_dir()?, false, ctx)
+        std::env::current_dir().context("Failed to read current directory")?
+    };
+    let removed = uninstall_antigravity_mode_at(&base_dir, global, ctx)?;
+
+    if removed.is_empty() {
+        println!("RTK Antigravity support was not installed (nothing to remove)");
+    } else {
+        let header = if ctx.dry_run {
+            "[dry-run] would uninstall RTK for Google Antigravity:"
+        } else {
+            "RTK uninstalled for Google Antigravity:"
+        };
+        println!("{header}");
+        for item in removed {
+            println!("  - {item}");
+        }
     }
+
+    if ctx.dry_run {
+        print_dry_run_footer();
+    }
+    Ok(())
 }
 
+/// Remove RTK's plugin directory, printing nothing. Returns what was removed, or under
+/// `--dry-run` what would be.
 pub fn uninstall_antigravity_mode_at(
     base_dir: &Path,
     global: bool,
@@ -118,12 +172,7 @@ pub fn uninstall_antigravity_mode_at(
     };
 
     if plugin_dir.exists() {
-        if dry_run {
-            println!(
-                "[dry-run] would remove Antigravity plugin directory: {}",
-                plugin_dir.display()
-            );
-        } else {
+        if !dry_run {
             // nosemgrep: filesystem-deletion -- uninstall intentionally removes only RTK's Antigravity plugin directory.
             fs::remove_dir_all(&plugin_dir).with_context(|| {
                 format!(
@@ -180,6 +229,13 @@ mod tests {
 
         assert!(manifest_path.exists(), "global plugin.json should exist");
         assert!(hooks_path.exists(), "global hooks.json should exist");
+        assert!(
+            plugin_dir
+                .join("rules")
+                .join(ANTIGRAVITY_RULES_FILE)
+                .is_file(),
+            "global rules/AGENTS.md should exist"
+        );
     }
 
     #[test]
@@ -211,6 +267,61 @@ mod tests {
         let plugin_dir = temp.path().join(".agents/plugins/rtk");
         assert!(plugin_dir.join("plugin.json").exists());
         assert!(plugin_dir.join("hooks.json").exists());
+    }
+
+    #[test]
+    fn test_antigravity_mode_writes_awareness_rules_at_each_level() {
+        for (level, expected) in [
+            (AwarenessLevel::Default, RTK_AWARENESS_DEFAULT),
+            (AwarenessLevel::High, RTK_AWARENESS_HIGH),
+            (AwarenessLevel::Full, RTK_AWARENESS_FULL),
+        ] {
+            let temp = TempDir::new().unwrap();
+            run_antigravity_mode_at(
+                temp.path(),
+                false,
+                InitContext {
+                    awareness: level,
+                    ..InitContext::default()
+                },
+            )
+            .unwrap();
+            let rules = fs::read_to_string(
+                temp.path()
+                    .join(".agents/plugins/rtk/rules")
+                    .join(ANTIGRAVITY_RULES_FILE),
+            )
+            .unwrap();
+            assert_eq!(rules, expected, "awareness level {level}");
+            assert!(
+                !rules.starts_with("---"),
+                "plugin rules are plain markdown, no frontmatter"
+            );
+        }
+    }
+
+    #[test]
+    fn test_antigravity_mode_reinit_rewrites_rules_for_a_new_level() {
+        let temp = TempDir::new().unwrap();
+        let rules_path = temp
+            .path()
+            .join(".agents/plugins/rtk/rules")
+            .join(ANTIGRAVITY_RULES_FILE);
+        for (level, expected) in [
+            (AwarenessLevel::Default, RTK_AWARENESS_DEFAULT),
+            (AwarenessLevel::Full, RTK_AWARENESS_FULL),
+        ] {
+            let ctx = InitContext {
+                awareness: level,
+                ..InitContext::default()
+            };
+            run_antigravity_mode_at(temp.path(), false, ctx).unwrap();
+            assert_eq!(
+                fs::read_to_string(&rules_path).unwrap(),
+                expected,
+                "{level}"
+            );
+        }
     }
 
     #[test]

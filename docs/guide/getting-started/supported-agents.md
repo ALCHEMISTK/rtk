@@ -278,7 +278,7 @@ rtk init --agent antigravity          # workspace-scoped (<repo>/.agents/plugins
 rtk init -g --agent antigravity       # machine-scoped (~/.gemini/config/plugins/rtk/)
 ```
 
-Installs an Antigravity plugin bundle with `hooks.json` mapping `PreToolUse` on `run_command` to the native `rtk hook antigravity` binary. Before any command executes, RTK rewrites the tool call arguments in place using `overwrite.CommandLine` (<1.5ms overhead).
+Installs an Antigravity plugin bundle: `hooks.json` maps `PreToolUse` on `run_command` to the native `rtk hook antigravity` binary, and `rules/AGENTS.md` carries the awareness file selected by `awareness.level`. Before any command executes, RTK rewrites the tool call arguments in place using `overwrite.CommandLine`.
 
 Antigravity checks permissions after lifecycle hooks rewrite a command. If you enforce command allowlists, ensure permitted commands include `rtk` (e.g. `command(rtk git status)` or `command(rtk *)`).
 

@@ -1945,14 +1945,7 @@ where
     } else if agent == Some(AgentTarget::Trae) {
         hooks::init::uninstall_trae_mode(global, ctx)
     } else if agent == Some(AgentTarget::Antigravity) {
-        let removed = hooks::init::uninstall_antigravity_mode(global, ctx)?;
-        if !ctx.dry_run {
-            println!("\nRTK uninstalled for Google Antigravity.\n");
-            for item in removed {
-                println!("  Removed: {}", item);
-            }
-        }
-        Ok(())
+        hooks::init::uninstall_antigravity_mode(global, ctx)
     } else if agent == Some(AgentTarget::Droid) {
         hooks::init::uninstall_droid(global, ctx)
     } else if agent == Some(AgentTarget::Vibe) {

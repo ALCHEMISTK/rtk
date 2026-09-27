@@ -4,8 +4,9 @@
 
 ## Specifics
 
-- Native programmatic `PreToolUse` lifecycle hook (`rtk hook antigravity`) providing transparent command rewriting (<1.5ms) via `overwrite.CommandLine`
+- Native programmatic `PreToolUse` lifecycle hook (`rtk hook antigravity`) providing transparent command rewriting via `overwrite.CommandLine`
 - Supported across all Antigravity surfaces: Antigravity CLI (`agy`), Antigravity IDE, and Antigravity 2.0
+- Installs the awareness file selected by `awareness.level` as `rules/AGENTS.md` inside the plugin (plain markdown, applied whenever the plugin is active)
 - Uses Antigravity's modular Plugin architecture:
   - Local workspace: `.agents/plugins/rtk/`
   - Global scope: `~/.gemini/config/plugins/rtk/`
