@@ -3139,4 +3139,38 @@ mod tests {
         assert_eq!(v["decision"], "allow");
         assert_eq!(v["overwrite"]["CommandLine"], "rtk git status");
     }
+
+    #[test]
+    fn test_antigravity_pre_prefixed_command_defers() {
+        let v = run_antigravity_inner(&antigravity_input("rtk git status"));
+        assert_eq!(v["decision"], "allow");
+        assert!(
+            v.get("overwrite").is_none(),
+            "already prefixed command must not be rewritten again"
+        );
+    }
+
+    #[test]
+    fn test_antigravity_shell_redirection_and_subshells_defer() {
+        for cmd in [
+            "git status $(whoami)",
+            "git status `whoami`",
+            "git status > /tmp/out.txt",
+            "git status < /tmp/in.txt",
+        ] {
+            let v = run_antigravity_inner(&antigravity_input(cmd));
+            assert_eq!(v["decision"], "allow");
+            assert!(
+                v.get("overwrite").is_none(),
+                "unattestable shell construct must defer without overwrite for {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_antigravity_unknown_binary_passthrough() {
+        let v = run_antigravity_inner(&antigravity_input("definitely-not-a-real-binary --foo"));
+        assert_eq!(v["decision"], "allow");
+        assert!(v.get("overwrite").is_none());
+    }
 }

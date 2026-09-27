@@ -243,7 +243,6 @@ mod tests {
         assert_eq!(first, second, "Idempotent: content should not change");
     }
 
-
     #[test]
     fn test_kimi_mode_writes_agents_md() {
         let temp = TempDir::new().unwrap();
@@ -295,7 +294,6 @@ mod tests {
                 RTK_AWARENESS_FULL,
                 "kilocode with level {level}"
             );
-
 
             run_kimi_mode_at(temp.path(), ctx).unwrap();
             let agents_md = fs::read_to_string(temp.path().join(AGENTS_MD)).unwrap();
