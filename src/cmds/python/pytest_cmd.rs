@@ -470,6 +470,42 @@ collected 0 items
     }
 
     #[test]
+    fn test_parse_duration_rejects_tails_that_are_not_seconds() {
+        assert_eq!(
+            parse_duration("=== 2 passed in 0.50s ===").as_deref(),
+            Some("0.50s")
+        );
+        assert_eq!(
+            parse_duration("2 passed in 65.12s (0:01:05)").as_deref(),
+            Some("65.12s")
+        );
+        assert_eq!(parse_duration("=== 2 passed ==="), None);
+        assert_eq!(parse_duration("2 passed in seconds"), None);
+        assert_eq!(parse_duration("2 passed in 0.50"), None);
+    }
+
+    #[test]
+    fn test_filter_pytest_duration_on_every_summary_shape() {
+        // Wrapped long-run form with a warnings part before the duration.
+        let output = "=== 5 passed, 2 warnings in 65.12s (0:01:05) ===";
+        assert_eq!(filter_pytest_output(output), "Pytest: 5 passed in 65.12s");
+
+        // Only-skipped run takes the multi-line emit path.
+        let output = "=== 3 skipped in 0.10s ===";
+        assert_eq!(
+            filter_pytest_output(output),
+            "Pytest: 0 passed, 0 failed, 3 skipped in 0.10s"
+        );
+
+        // Quiet-mode failures line keeps its duration on the multi-line path too.
+        let output = "5 failed, 1698 passed, 2 skipped in 108.89s";
+        assert_eq!(
+            filter_pytest_output(output),
+            "Pytest: 1698 passed, 5 failed, 2 skipped in 108.89s"
+        );
+    }
+
+    #[test]
     fn test_filter_pytest_xfail_caps_and_tee_hint() {
         let mut lines = String::from("=== test session starts ===\ncollected 30 items\n\n");
         lines.push_str("test_x.py ");
