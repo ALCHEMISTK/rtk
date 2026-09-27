@@ -578,7 +578,7 @@ enum Commands {
 
     /// Discover missed RTK savings from Claude Code history
     Discover {
-        /// Filter by project path (substring match)
+        /// Filter by project path (substring match; case-insensitive on Windows)
         #[arg(short, long)]
         project: Option<String>,
         /// Max commands per section
@@ -606,7 +606,7 @@ enum Commands {
 
     /// Learn CLI corrections from Claude Code error history
     Learn {
-        /// Filter by project path (substring match)
+        /// Filter by project path (substring match; case-insensitive on Windows)
         #[arg(short, long)]
         project: Option<String>,
         /// Scan all projects (default: current project only)
