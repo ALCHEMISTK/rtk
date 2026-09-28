@@ -380,6 +380,26 @@ pub fn run(
                 // Detect RTK_DISABLED= bypass before classification
                 let (env_prefix, actual_cmd) = strip_disabled_prefix_for_analytics(part);
                 let part = if prefix_contains_rtk_disabled(env_prefix) {
+                    // The counterfactual the bypass bucket asks is "would the hook
+                    // have rewritten THIS command line without the RTK_DISABLED=".
+                    // That question has to keep the wrapper (`sudo`, `env -i`, a
+                    // configured `transparent_prefixes` entry): `docker ps` alone
+                    // always rewrites, while `sudo docker ps` only does when the user
+                    // configured `sudo` as a transparent prefix. Drop just the
+                    // RTK_DISABLED= assignments -- rewrite_command_precompiled refuses
+                    // a string that still carries one.
+                    let unbypassed: String = {
+                        let mut s = String::with_capacity(part.len());
+                        for tok in env_prefix.split_whitespace() {
+                            if tok.starts_with("RTK_DISABLED=") {
+                                continue;
+                            }
+                            s.push_str(tok);
+                            s.push(' ');
+                        }
+                        s.push_str(actual_cmd);
+                        s
+                    };
                     match classify_command(actual_cmd) {
                         Classification::Supported { .. } => {
                             // Only count as a "bypass" if the hook would actually have
@@ -391,7 +411,7 @@ pub fn run(
                             // measured-log path.
                             if would_be_covered_without_bypass(
                                 &ext_cmd.command,
-                                actual_cmd,
+                                unbypassed.trim(),
                                 &coverage_ctx,
                             ) {
                                 rtk_disabled_count += 1;
@@ -682,6 +702,38 @@ mod tests {
             "ls -la",
             PermissionVerdict::Allow,
             &ctx,
+        ));
+    }
+
+    #[test]
+    fn test_coverage_question_keeps_the_wrapper_the_user_typed() {
+        // The analytics peel strips `sudo` so the bypass can be *detected*,
+        // but the counterfactual ("would the hook have rewritten this without the
+        // RTK_DISABLED=") has to keep the wrapper. `docker ps` always rewrites;
+        // `sudo docker ps` does not (#146 / test_rewrite_sudo_passthrough), so a
+        // sudo-wrapped bypass recovers no savings and must not be counted.
+        let ctx = test_ctx(true);
+        assert!(!estimate_hook_coverage_with_verdict(
+            "sudo RTK_DISABLED=1 docker ps",
+            "sudo docker ps",
+            PermissionVerdict::Default,
+            &ctx,
+        ));
+        // The stripped segment alone would say yes.
+        assert!(estimate_hook_coverage_with_verdict(
+            "sudo RTK_DISABLED=1 docker ps",
+            "docker ps",
+            PermissionVerdict::Default,
+            &ctx,
+        ));
+        // …and it becomes a real bypass once the user declares sudo transparent.
+        let mut ctx_sudo = test_ctx(true);
+        ctx_sudo.normalized_transparent_prefixes = vec!["sudo".to_string()];
+        assert!(estimate_hook_coverage_with_verdict(
+            "sudo RTK_DISABLED=1 docker ps",
+            "sudo docker ps",
+            PermissionVerdict::Default,
+            &ctx_sudo,
         ));
     }
 

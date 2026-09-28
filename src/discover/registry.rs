@@ -662,7 +662,9 @@ pub fn strip_disabled_prefix_for_analytics(cmd: &str) -> (&str, &str) {
 
 /// Check if a command has RTK_DISABLED= prefix in its env prefix portion.
 pub fn cmd_has_rtk_disabled_prefix(cmd: &str) -> bool {
-    let (prefix_part, _) = strip_disabled_prefix_for_analytics(cmd);
+    // `gain` has no coverage gate, so this stays on the syntactic rewrite-path
+    // stripper; the wrapper-aware peel is for discover, where the gate judges it.
+    let (prefix_part, _) = strip_disabled_prefix(cmd);
     prefix_contains_rtk_disabled(prefix_part)
 }
 
@@ -6601,8 +6603,13 @@ mod tests {
         assert!(cmd_has_rtk_disabled_prefix(
             "RTK_DISABLED=true git log --oneline"
         ));
-        assert!(cmd_has_rtk_disabled_prefix("sudo RTK_DISABLED=1 docker ps"));
-        assert!(cmd_has_rtk_disabled_prefix(
+        // `gain`'s warning has no coverage gate, so this predicate stays purely
+        // syntactic (`ENV_PREFIX`): a `sudo`-first bypass is not counted there.
+        // The wrapper-aware peel is discover-only, where the gate can judge it.
+        assert!(!cmd_has_rtk_disabled_prefix(
+            "sudo RTK_DISABLED=1 docker ps"
+        ));
+        assert!(!cmd_has_rtk_disabled_prefix(
             "sudo -E RTK_DISABLED=1 docker ps"
         ));
         assert!(cmd_has_rtk_disabled_prefix("RTK_DISABLED=1 sudo docker ps"));
