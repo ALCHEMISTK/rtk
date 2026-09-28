@@ -43,6 +43,7 @@ struct PackageResult {
     failed_tests: Vec<(String, Vec<String>)>, // (test_name, output_lines)
     package_failed: bool,                     // package-level failure (timeout, signal, etc.)
     package_fail_output: Vec<String>,         // output lines collected before the package fail
+    fuzz_summary: Option<String>,
 }
 
 pub fn run_test(args: &[String], verbose: u8) -> Result<i32> {
@@ -295,6 +296,7 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
     let mut packages: HashMap<String, PackageResult> = HashMap::new();
     let mut current_test_output: HashMap<(String, String), Vec<String>> = HashMap::new(); // (package, test) -> outputs
     let mut build_output: HashMap<String, Vec<String>> = HashMap::new(); // import_path -> error lines
+    let mut non_json_lines: Vec<String> = Vec::new();
 
     for line in output.lines() {
         let trimmed = line.trim();
@@ -304,7 +306,10 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
 
         let event: GoTestEvent = match serde_json::from_str(trimmed) {
             Ok(e) => e,
-            Err(_) => continue, // Skip non-JSON lines
+            Err(_) => {
+                non_json_lines.push(trimmed.to_string());
+                continue;
+            }
         };
 
         // Handle build-output/build-fail events (use ImportPath, no Package)
@@ -367,6 +372,9 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
                 if let Some(output_text) = &event.output {
                     if let Some(test) = &event.test {
                         // Collect output for current test
+                        if output_text.starts_with("fuzz: elapsed:") {
+                            pkg_result.fuzz_summary = Some(output_text.trim_end().to_string());
+                        }
                         let key = (package.clone(), test.clone());
                         current_test_output
                             .entry(key)
@@ -402,7 +410,18 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
     let has_failures = total_fail > 0 || total_build_fail > 0 || total_pkg_fail > 0;
 
     if !has_failures && total_pass == 0 {
-        return "Go test: No tests found".to_string();
+        if non_json_lines.is_empty() {
+            return "Go test: No tests found".to_string();
+        }
+        return format_non_json_lines(&non_json_lines);
+    }
+
+    let total_fuzz = packages
+        .values()
+        .filter(|p| p.fuzz_summary.is_some())
+        .count();
+    if !has_failures && total_fuzz > 0 {
+        return format_fuzz_summary(&packages, total_pass, total_fuzz);
     }
 
     if !has_failures {
@@ -483,6 +502,43 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
         }
     }
 
+    result.trim().to_string()
+}
+
+fn format_non_json_lines(lines: &[String]) -> String {
+    let mut result = String::from("Go test: error\n");
+    for line in lines.iter().take(CAP_ERRORS) {
+        result.push_str(&format!("{}\n", truncate(line, 120)));
+    }
+    if lines.len() > CAP_ERRORS {
+        result.push_str(&format!("... +{} more lines\n", lines.len() - CAP_ERRORS));
+    }
+    result.trim().to_string()
+}
+
+fn format_fuzz_summary(
+    packages: &HashMap<String, PackageResult>,
+    total_pass: usize,
+    total_fuzz: usize,
+) -> String {
+    let mut result = format!(
+        "Go test: {} passed, {} fuzz in {} packages\n",
+        total_pass,
+        total_fuzz,
+        packages.len()
+    );
+    let mut fuzzed: Vec<(&String, &String)> = packages
+        .iter()
+        .filter_map(|(pkg, r)| r.fuzz_summary.as_ref().map(|s| (pkg, s)))
+        .collect();
+    fuzzed.sort();
+    for (package, summary) in fuzzed {
+        result.push_str(&format!(
+            "{}\n  {}\n",
+            compact_package_name(package),
+            summary
+        ));
+    }
     result.trim().to_string()
 }
 
@@ -1131,5 +1187,93 @@ utils.go:15:5: unreachable code"#;
         assert!(!has_golangci_format_flag(&os(&["run", "./..."])));
         assert!(!has_golangci_format_flag(&os(&[])));
         assert!(!has_golangci_format_flag(&os(&["--fix"])));
+    }
+
+    #[test]
+    fn test_filter_go_test_non_json_lines_surface_instead_of_no_tests_found() {
+        let output = "error: cannot find package\nsome other error line";
+
+        let result = filter_go_test_json(output);
+
+        assert_eq!(
+            result,
+            "Go test: error\nerror: cannot find package\nsome other error line"
+        );
+    }
+
+    #[test]
+    fn test_filter_go_test_non_json_lines_capped() {
+        let output = (0..25)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let result = filter_go_test_json(&output);
+
+        assert!(result.contains("line 19"));
+        assert!(!result.contains("line 20"));
+        assert!(result.ends_with("... +5 more lines"));
+    }
+
+    #[test]
+    fn test_filter_go_test_non_json_ignored_when_tests_pass() {
+        let output = r#"stray line
+{"Action":"pass","Package":"example.com/foo","Test":"TestA","Elapsed":0.01}
+{"Action":"pass","Package":"example.com/foo","Elapsed":0.02}"#;
+
+        let result = filter_go_test_json(output);
+
+        assert_eq!(result, "Go test: 1 passed in 1 packages");
+    }
+
+    #[test]
+    fn test_filter_go_test_fuzz_keeps_last_elapsed_line() {
+        let output = r#"{"Action":"start","Package":"example.com/foo"}
+{"Action":"run","Package":"example.com/foo","Test":"FuzzBar"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"=== RUN   FuzzBar\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"fuzz: elapsed: 0s, gathering baseline coverage: 0/6 completed\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"fuzz: elapsed: 3s, execs: 224325 (74749/sec), new interesting: 0 (total: 6)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"fuzz: elapsed: 10s, execs: 842077 (78542/sec), new interesting: 0 (total: 6)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"--- PASS: FuzzBar (10.10s)\n"}
+{"Action":"pass","Package":"example.com/foo","Test":"FuzzBar","Elapsed":10.1}
+{"Action":"output","Package":"example.com/foo","Output":"PASS\n"}
+{"Action":"pass","Package":"example.com/foo","Elapsed":10.414}"#;
+
+        let result = filter_go_test_json(output);
+
+        assert_eq!(
+            result,
+            "Go test: 1 passed, 1 fuzz in 1 packages\nfoo\n  fuzz: elapsed: 10s, execs: 842077 (78542/sec), new interesting: 0 (total: 6)"
+        );
+    }
+
+    #[test]
+    fn test_filter_go_test_fuzz_with_unit_tests() {
+        let output = r#"{"Action":"pass","Package":"example.com/foo","Test":"TestUnit","Elapsed":0.01}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"fuzz: elapsed: 3s, execs: 100000 (33333/sec), new interesting: 1 (total: 5)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzBar","Output":"fuzz: elapsed: 5s, execs: 200000 (40000/sec), new interesting: 2 (total: 6)\n"}
+{"Action":"pass","Package":"example.com/foo","Test":"FuzzBar","Elapsed":5.0}
+{"Action":"pass","Package":"example.com/foo","Elapsed":5.1}"#;
+
+        let result = filter_go_test_json(output);
+
+        assert!(result.starts_with("Go test: 2 passed, 1 fuzz in 1 packages"));
+        assert!(result.contains("execs: 200000"));
+        assert!(!result.contains("execs: 100000"));
+    }
+
+    #[test]
+    fn test_filter_go_test_fuzz_multi_package_sorted() {
+        let output = r#"{"Action":"output","Package":"example.com/b","Test":"FuzzB","Output":"fuzz: elapsed: 2s, execs: 20\n"}
+{"Action":"pass","Package":"example.com/b","Test":"FuzzB","Elapsed":2.0}
+{"Action":"output","Package":"example.com/a","Test":"FuzzA","Output":"fuzz: elapsed: 1s, execs: 10\n"}
+{"Action":"pass","Package":"example.com/a","Test":"FuzzA","Elapsed":1.0}"#;
+
+        let result = filter_go_test_json(output);
+
+        assert_eq!(
+            result,
+            "Go test: 2 passed, 2 fuzz in 2 packages\na\n  fuzz: elapsed: 1s, execs: 10\nb\n  fuzz: elapsed: 2s, execs: 20"
+        );
     }
 }
