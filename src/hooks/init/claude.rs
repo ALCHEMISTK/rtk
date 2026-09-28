@@ -208,7 +208,10 @@ fn patch_settings_json_command(
     } = ctx;
     let claude_dir = resolve_claude_dir()?;
     // Ensure the config directory exists (fixes #2519, #4046 Windows regression)
-    fs::create_dir_all(&claude_dir)?;
+    // Only create in non-dry-run mode; dry-run must not create directories.
+    if !dry_run {
+        fs::create_dir_all(&claude_dir)?;
+    }
     let settings_path = claude_dir.join(SETTINGS_JSON);
 
     let mut root = read_json_file(&settings_path)?.unwrap_or_else(|| serde_json::json!({}));
@@ -336,7 +339,10 @@ pub(super) fn run_default_mode(
 
     let claude_dir = resolve_claude_dir()?;
     // Ensure the config directory exists (fixes #2519, #4046 Windows regression)
-    fs::create_dir_all(&claude_dir)?;
+    // Only create in non-dry-run mode; dry-run must not create directories.
+    if !dry_run {
+        fs::create_dir_all(&claude_dir)?;
+    }
     let rtk_md_path = claude_dir.join(RTK_MD);
     let claude_md_path = claude_dir.join(CLAUDE_MD);
 
