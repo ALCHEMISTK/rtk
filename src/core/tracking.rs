@@ -1586,7 +1586,7 @@ fn categorize_command(rtk_cmd: &str) -> String {
         "cargo" => "cargo",
         "npm" | "npx" | "pnpm" | "bun" | "bunx" | "deno" | "vitest" | "tsc" | "lint"
         | "prettier" | "next" | "playwright" | "prisma" => "js",
-        "pytest" | "ruff" | "mypy" | "pip" | "sqlfluff" => "python",
+        "pytest" | "ruff" | "mypy" | "pip" | "sqlfluff" | "uv" => "python",
         "go" | "golangci-lint" => "go",
         "docker" | "kubectl" => "cloud",
         "rspec" | "rubocop" | "rake" => "ruby",
@@ -2783,6 +2783,13 @@ mod tests {
     fn test_categorize_bun_and_deno_as_js() {
         for cmd in ["rtk bun install", "rtk bunx cowsay", "rtk deno test"] {
             assert_eq!(categorize_command(cmd), "js", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_categorize_uv_as_python() {
+        for cmd in ["rtk uv sync", "rtk uv run pytest", "rtk uv pip install foo"] {
+            assert_eq!(categorize_command(cmd), "python", "{cmd}");
         }
     }
 
