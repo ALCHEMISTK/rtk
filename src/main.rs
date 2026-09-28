@@ -2613,7 +2613,7 @@ fn run_cli() -> Result<i32> {
                 // Claude target should install Claude Code files. Without this
                 // guard, `rtk init -g --agent cursor` writes into ~/.claude (#2097).
                 let install_claude =
-                    !opencode && !install_cursor && !install_windsurf && !install_cline;
+                    !install_cursor && !install_windsurf && !install_cline;
 
                 hooks::init::run(
                     global,
