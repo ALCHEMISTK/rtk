@@ -3479,6 +3479,7 @@ fn is_operational_command(cmd: &Commands) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::test_isolation;
     use clap::Parser;
     use std::cell::Cell;
 
@@ -4509,9 +4510,9 @@ mod tests {
     fn test_broken_pipe_does_not_crash() {
         // A throwaway repo, not whichever one the contributor happens to be sitting in:
         // outside a repo `git log` only errors, and the test stops exercising the pipe.
-        let repo = core::test_support::temp_git_repo();
+        let repo = test_isolation::temp_git_repo();
 
-        let mut child = core::test_support::rtk_command()
+        let mut child = test_isolation::rtk_command()
             .args(["git", "log", "--oneline", "-50"])
             .current_dir(repo.path())
             .stdout(std::process::Stdio::piped())
