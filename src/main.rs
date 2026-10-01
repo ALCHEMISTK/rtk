@@ -294,11 +294,13 @@ enum Commands {
     /// Ultra-condensed diff (only changed lines)
     ///
     /// Comparing two files exits 0 if identical, 1 if different, and 2 on a
-    /// file-read error. Non-UTF-8 files are compared byte for byte.
+    /// file-read error. A single file operand is a usage error (exit 2), not a
+    /// diff to condense; `-` reads a piped diff from stdin. Non-UTF-8 files are
+    /// compared byte for byte.
     Diff {
         /// First file or - for stdin (unified diff)
         file1: PathBuf,
-        /// Second file (optional if stdin)
+        /// Second file (omit for stdin or a usage-error one-operand call)
         file2: Option<PathBuf>,
     },
 
@@ -2408,9 +2410,16 @@ fn run_cli() -> Result<i32> {
         Commands::Diff { file1, file2 } => {
             if let Some(f2) = file2 {
                 diff_cmd::run(&file1, &f2, cli.verbose)?
-            } else {
+            } else if file1.as_os_str() == "-" {
                 diff_cmd::run_stdin(cli.verbose)?;
                 0
+            } else {
+                // One file operand is not a diff to condense: real `diff` reports
+                // the usage error and exits 2 before opening the file, so a
+                // `diff <file> && next` step stops where `diff` would stop.
+                // Echoing stdin here made a bad invocation succeed (#4320).
+                eprintln!("diff: missing operand after '{}'", file1.display());
+                2
             }
         }
 
