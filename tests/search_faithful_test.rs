@@ -8,10 +8,12 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+mod common;
+
 /// grep/rg error text (e.g. "Is a directory") is localized; pin it so
 /// assertions on that text mean the same thing in every contributor's shell.
 fn rtk() -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rtk"));
+    let mut cmd = common::rtk_command();
     cmd.env("LC_ALL", "C");
     cmd
 }

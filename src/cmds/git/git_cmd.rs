@@ -12,6 +12,7 @@ use crate::core::stream::{
 };
 use crate::core::tracking;
 use crate::core::truncate::{CAP_LIST, CAP_WARNINGS};
+use crate::core::user_dirs;
 use crate::core::utils::{exit_code_from_status, join_with_overflow, resolved_command, strip_ansi};
 use anyhow::{Context, Result};
 use std::ffi::OsString;
@@ -3713,7 +3714,7 @@ fn run_worktree(args: &[String], verbose: u8, global_args: &[String]) -> Result<
 }
 
 fn filter_worktree_list(output: &str) -> String {
-    let home = dirs::home_dir()
+    let home = user_dirs::home()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_default();
 
@@ -3766,7 +3767,7 @@ pub fn run_passthrough(args: &[OsString], global_args: &[String], verbose: u8) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::test_support;
+    use crate::core::test_isolation;
 
     #[test]
     fn test_branch_dash_u_links_its_upstream_value_not_a_free_positional() {
@@ -3862,13 +3863,15 @@ mod tests {
     #[test]
     fn test_git_cmd_c_locale_sets_stable_env() {
         let cmd = git_cmd_c_locale(&[]);
+        // Set entries only: a test build also removes the inherited `GIT_`
+        // variables from every git command.
         let envs: Vec<_> = cmd
             .get_envs()
-            .map(|(key, value)| {
-                (
+            .filter_map(|(key, value)| {
+                Some((
                     key.to_string_lossy().to_string(),
-                    value.expect("env value").to_string_lossy().to_string(),
-                )
+                    value?.to_string_lossy().to_string(),
+                ))
             })
             .collect();
         assert!(envs.contains(&("LC_ALL".to_string(), "C".to_string())));
@@ -3923,12 +3926,11 @@ mod tests {
         // flattened into "Clean working tree" + exit 0.
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().to_string_lossy().into_owned();
+        let mut init = Command::new("git");
+        init.args(["-C", &p, "init", "-q"]);
+        test_isolation::isolate_git(&mut init);
         assert!(
-            Command::new("git")
-                .args(["-C", &p, "init", "-q"])
-                .status()
-                .expect("git init")
-                .success(),
+            init.status().expect("git init").success(),
             "git init should succeed"
         );
         std::fs::write(dir.path().join(".git/index"), "corrupt-index").expect("corrupt index");
@@ -6455,12 +6457,12 @@ no changes added to commit (use "git add" and/or "git commit -a")
     /// Before fix, positional args fell into list mode which added `-a`,
     /// turning creation into a pattern-filtered listing (silent no-op).
     #[test]
-    #[ignore] // Integration test: requires git repo
+    #[ignore] // Integration test: requires git
     fn test_branch_creation_not_swallowed() {
-        let repo = test_support::temp_git_repo();
+        let repo = test_isolation::temp_git_repo();
         let branch = "test-rtk-create-branch-regression";
 
-        let created = test_support::rtk_command()
+        let created = test_isolation::rtk_command()
             .args(["git", "branch", branch])
             .current_dir(repo.path())
             .output()
@@ -6471,7 +6473,8 @@ no changes added to commit (use "git add" and/or "git commit -a")
         );
 
         let mut list = std::process::Command::new("git");
-        let output = test_support::pin_environment(&mut list)
+        test_isolation::isolate_git(&mut list);
+        let output = list
             .args(["branch", "--list", branch])
             .current_dir(repo.path())
             .output()
@@ -6486,12 +6489,12 @@ no changes added to commit (use "git add" and/or "git commit -a")
 
     /// Regression test: `git branch <name> <commit>` must create from commit.
     #[test]
-    #[ignore] // Integration test: requires git repo
+    #[ignore] // Integration test: requires git
     fn test_branch_creation_from_commit() {
-        let repo = test_support::temp_git_repo();
+        let repo = test_isolation::temp_git_repo();
         let branch = "test-rtk-create-from-commit";
 
-        let created = test_support::rtk_command()
+        let created = test_isolation::rtk_command()
             .args(["git", "branch", branch, "HEAD"])
             .current_dir(repo.path())
             .output()
@@ -6502,7 +6505,8 @@ no changes added to commit (use "git add" and/or "git commit -a")
         );
 
         let mut list = std::process::Command::new("git");
-        let output = test_support::pin_environment(&mut list)
+        test_isolation::isolate_git(&mut list);
+        let output = list
             .args(["branch", "--list", branch])
             .current_dir(repo.path())
             .output()
@@ -6585,7 +6589,7 @@ no changes added to commit (use "git add" and/or "git commit -a")
         // fixed /tmp path: two contributors (or two parallel runs) would share the latter.
         let tmp = tempfile::tempdir().expect("tempdir");
 
-        let output = test_support::rtk_command()
+        let output = test_isolation::rtk_command()
             .args(["git", "status"])
             .current_dir(tmp.path())
             .output()

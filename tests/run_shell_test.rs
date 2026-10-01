@@ -1,9 +1,11 @@
+mod common;
+
 #[cfg(unix)]
 mod unix {
     use std::process::Command;
 
     fn rtk() -> Command {
-        Command::new(env!("CARGO_BIN_EXE_rtk"))
+        crate::common::rtk_command()
     }
 
     #[test]
@@ -443,7 +445,7 @@ mod windows {
     use std::process::Command;
 
     fn rtk() -> Command {
-        Command::new(env!("CARGO_BIN_EXE_rtk"))
+        crate::common::rtk_command()
     }
 
     /// Direct execution resolves through `%PATH%` (and `PATHEXT`), where the
@@ -470,13 +472,11 @@ mod windows {
     #[test]
     fn quoted_arguments_reach_the_child_intact() {
         let home = tempfile::tempdir().expect("create isolated home");
+        let child = rtk();
         let output = rtk()
-            .args([
-                "run",
-                env!("CARGO_BIN_EXE_rtk"),
-                "rewrite",
-                "git status \"a b\"",
-            ])
+            .arg("run")
+            .arg(child.get_program())
+            .args(["rewrite", "git status \"a b\""])
             .env("HOME", home.path())
             .env("USERPROFILE", home.path())
             .env("XDG_CONFIG_HOME", home.path())
