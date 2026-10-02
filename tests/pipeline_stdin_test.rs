@@ -22,7 +22,7 @@ fn early_exit_preserves_output_and_status_when_stdin_is_closed() {
     // regardless of whether the child exits before or during write_all.
     let input = vec![b'x'; 8 * 1024 * 1024];
     let output = run_with_stdin(
-        Command::new("sh").args(["-c", "exec 0<&-; printf 'early exit\\n'; exit 7"]),
+        Command::new("sh").args(["-c", "printf 'early exit\\n'; exit 7"]),
         &input,
     );
 
