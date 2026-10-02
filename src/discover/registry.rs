@@ -601,9 +601,8 @@ fn is_analytics_env_wrapper_token(value: &str) -> bool {
 /// `env` / assign / `-flag` wrapper around it.
 ///
 /// Unlike [`strip_disabled_prefix`] (rewrite path), this recognizes
-/// `sudo RTK_DISABLED=1 …` and `RTK_DISABLED=1 sudo …` so discover/gain can
-/// count them as bypasses. It is intentionally stricter than a full shell
-/// parse:
+/// `sudo RTK_DISABLED=1 …` and `RTK_DISABLED=1 sudo …` so discover can find
+/// them; whether one counts as a bypass is `judge_disabled_segment`'s call. It is intentionally stricter than a full shell parse:
 /// - never looks past `|` / `&&` / other non-`Arg` tokens for `RTK_DISABLED=`
 /// - prefix before `RTK_DISABLED=` may only be wrapper tokens (above)
 /// - after `RTK_DISABLED=`, takes the first non-wrapper command word and
@@ -614,8 +613,8 @@ pub fn strip_disabled_prefix_for_analytics(cmd: &str) -> (&str, &str) {
 
     let mut disabled_index = None;
     for (i, token) in tokens.iter().enumerate() {
-        // Do not search for RTK_DISABLED= across pipes/operators — gain.rs
-        // passes whole unsplit lines into cmd_has_rtk_disabled_prefix.
+        // A non-`Arg` token (operator, redirect) ends the prefix: an
+        // `RTK_DISABLED=` after it belongs to another command.
         if token.kind != TokenKind::Arg {
             break;
         }
@@ -6706,6 +6705,21 @@ mod tests {
                 "must not attribute inner command for {cmd}: {actual}"
             );
         }
+
+        // Every wrapper class is peeled: an assignment after `sudo`, and `env`.
+        assert_eq!(
+            strip_disabled_prefix_for_analytics("sudo FOO=1 RTK_DISABLED=1 docker ps"),
+            ("sudo FOO=1 RTK_DISABLED=1 ", "docker ps")
+        );
+        assert_eq!(
+            strip_disabled_prefix_for_analytics("sudo env RTK_DISABLED=1 docker ps"),
+            ("sudo env RTK_DISABLED=1 ", "docker ps")
+        );
+        // An operator ends the prefix even when only wrapper words precede it.
+        assert_eq!(
+            strip_disabled_prefix_for_analytics("sudo -v && RTK_DISABLED=1 docker ps"),
+            ("", "sudo -v && RTK_DISABLED=1 docker ps")
+        );
 
         // Buried -e / && cases fall back to the rewrite stripper (no sudo peel).
         assert_eq!(
