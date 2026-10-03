@@ -300,7 +300,7 @@ enum Commands {
     Diff {
         /// First file or - for stdin (unified diff)
         file1: PathBuf,
-        /// Second file (omit for stdin or a usage-error one-operand call)
+        /// Second file (omit only when the first is - for stdin)
         file2: Option<PathBuf>,
     },
 
@@ -2414,10 +2414,8 @@ fn run_cli() -> Result<i32> {
                 diff_cmd::run_stdin(cli.verbose)?;
                 0
             } else {
-                // One file operand is not a diff to condense: real `diff` reports
-                // the usage error and exits 2 before opening the file, so a
-                // `diff <file> && next` step stops where `diff` would stop.
-                // Echoing stdin here made a bad invocation succeed (#4320).
+                // `diff` rejects a lone file operand as a usage error, exit 2,
+                // before opening it, so `diff <file> && next` stops here too.
                 eprintln!("diff: missing operand after '{}'", file1.display());
                 2
             }

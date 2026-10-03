@@ -126,6 +126,36 @@ fn one_file_operand_is_a_usage_error_not_a_stdin_condense() {
 }
 
 #[test]
+fn one_missing_operand_is_a_usage_error_before_any_read() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let piped = dir.path().join("piped.diff");
+    fs::write(&piped, "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-x\n+y\n").expect("write piped diff");
+    let missing = dir.path().join("missing.txt");
+
+    let output = common::rtk_command()
+        .args([DIFF_SUBCOMMAND, &missing.display().to_string()])
+        .stdin(fs::File::open(&piped).expect("open piped diff"))
+        .output()
+        .expect("run rtk diff with one missing operand");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains("missing operand after"),
+        "the usage error comes before the operand is opened: {stderr}"
+    );
+    assert!(
+        !stderr.contains("rtk diff:"),
+        "the missing operand is not read: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdin is not condensed on a usage error: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn explicit_stdin_dash_still_condenses() {
     use std::io::Write as _;
     use std::process::Stdio;
