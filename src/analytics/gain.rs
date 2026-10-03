@@ -2,6 +2,7 @@
 
 use crate::core::display_helpers::{format_duration, print_period_table};
 use crate::core::tracking::{DayStats, MonthStats, Tracker, WeekStats};
+use crate::core::user_dirs;
 use crate::core::utils::{format_tokens, truncate};
 use crate::hooks::hook_check;
 use anyhow::{Context, Result};
@@ -137,9 +138,12 @@ pub fn run(
         print_efficiency_meter(summary.avg_savings_pct);
         println!();
 
-        // Warn about hook issues that silently kill savings (stderr, not stdout)
+        // Warn about hook issues that silently kill savings (stderr, not stdout).
+        // `suppress_hook_warning` hides the missing-hook arm here too: a user who
+        // runs rtk without hooks on purpose reads this report most often, and the
+        // outdated-hook arm stays visible either way.
         match hook_check::status() {
-            hook_check::HookStatus::Missing => {
+            hook_check::HookStatus::Missing if !crate::core::config::hook_warning_suppressed() => {
                 eprintln!(
                     "{}",
                     "[warn] No hook installed — run `rtk init -g` for automatic token savings"
@@ -154,7 +158,7 @@ pub fn run(
                 );
                 eprintln!();
             }
-            hook_check::HookStatus::Ok => {}
+            hook_check::HookStatus::Missing | hook_check::HookStatus::Ok => {}
         }
 
         // Lightweight RTK_DISABLED bypass check (best-effort, silent on failure)
@@ -555,7 +559,7 @@ fn resolve_project_scope(project: bool) -> Result<Option<String>> {
     if !project {
         return Ok(None);
     }
-    let cwd = std::env::current_dir().context("Failed to resolve current working directory")?;
+    let cwd = user_dirs::current_dir().context("Failed to resolve current working directory")?;
     let canonical = cwd.canonicalize().unwrap_or(cwd);
     Ok(Some(canonical.to_string_lossy().to_string()))
 }
