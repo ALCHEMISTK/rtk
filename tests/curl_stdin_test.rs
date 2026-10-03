@@ -2,7 +2,9 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+
+mod common;
 
 /// Accept one HTTP request on `listener` and return the exact request body.
 fn read_one_request_body(listener: TcpListener) -> Vec<u8> {
@@ -52,10 +54,12 @@ fn curl_forwards_piped_stdin_body() {
     let server = std::thread::spawn(move || read_one_request_body(listener));
 
     let body = b"{\"via\":\"heredoc\"}";
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rtk"))
+    let mut child = common::rtk_command()
         .args([
             "curl",
             "-sS",
+            "--noproxy",
+            "*",
             "-X",
             "PUT",
             "-H",
