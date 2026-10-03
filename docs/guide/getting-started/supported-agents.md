@@ -324,7 +324,7 @@ Rules file integrations (Cline, Windsurf, Kilo Code) rely on the model following
 
 ## Windows support
 
-Since v0.37.2, `rtk init -g` registers the native `rtk hook claude` command on Windows, so Claude Code gets full auto-rewrite without a Unix shell. Setups created before v0.37.2 may still point at the legacy `rtk-rewrite.sh` script; re-running `rtk init -g` migrates them.
+Since v0.37.2, `rtk init -g` registers the native `rtk hook claude` command on Windows, so Claude Code gets full auto-rewrite without a Unix shell. Setups created before v0.37.2 used CLAUDE.md injection and have no hook; re-running `rtk init -g` migrates them, and adds the hook once you answer `y` to the `settings.json` prompt (or pass `--auto-patch`).
 
 Integrations that install a shell wrapper script (such as Gemini) still need a Unix shell. For those, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), where they work identically to Linux. Native Rust hook integrations such as Trae do not depend on a shell script.
 
