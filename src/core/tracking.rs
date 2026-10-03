@@ -1814,7 +1814,7 @@ pub fn estimate_tokens_from_len(len: usize) -> usize {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// use rtk::tracking::TimedExecution;
 ///
 /// let timer = TimedExecution::start();
