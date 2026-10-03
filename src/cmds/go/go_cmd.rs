@@ -296,6 +296,7 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
     let mut packages: HashMap<String, PackageResult> = HashMap::new();
     let mut current_test_output: HashMap<(String, String), Vec<String>> = HashMap::new(); // (package, test) -> outputs
     let mut build_output: HashMap<String, Vec<String>> = HashMap::new(); // import_path -> error lines
+
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -366,10 +367,11 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
             "output" => {
                 if let Some(output_text) = &event.output {
                     if let Some(test) = &event.test {
-                        // Collect output for current test
+                        // Keep the package's last fuzz progress line: Go prints the final stats there
                         if output_text.starts_with("fuzz: elapsed:") {
                             pkg_result.fuzz_summary = Some(output_text.trim_end().to_string());
                         }
+                        // Collect output for current test
                         let key = (package.clone(), test.clone());
                         current_test_output
                             .entry(key)
@@ -1232,6 +1234,32 @@ utils.go:15:5: unreachable code"#;
             "got: {}",
             result
         );
+        assert!(!result.contains("fuzz in"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_filter_go_test_fuzz_package_failure_reports_failure_not_fuzz_summary() {
+        // TestMain exits non-zero after a green fuzz run: no test-level `fail`, only the package one
+        let output = r#"{"Action":"start","Package":"example.com/foo"}
+{"Action":"run","Package":"example.com/foo","Test":"FuzzRev"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"fuzz: elapsed: 3s, execs: 199077 (66340/sec), new interesting: 0 (total: 59)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"fuzz: elapsed: 4s, execs: 199077 (0/sec), new interesting: 0 (total: 59)\n"}
+{"Action":"pass","Package":"example.com/foo","Test":"FuzzRev","Elapsed":4.0}
+{"Action":"output","Package":"example.com/foo","Output":"PASS\n"}
+{"Action":"output","Package":"example.com/foo","Output":"teardown failed\n"}
+{"Action":"output","Package":"example.com/foo","Output":"exit status 3\n"}
+{"Action":"output","Package":"example.com/foo","Output":"FAIL\texample.com/foo\t4.052s\n"}
+{"Action":"fail","Package":"example.com/foo","Elapsed":4.05}"#;
+
+        let result = filter_go_test_json(output);
+
+        assert!(
+            result.starts_with("Go test: 1 passed, 1 failed in 1 packages"),
+            "got: {}",
+            result
+        );
+        assert!(result.contains("foo [FAIL]"), "got: {}", result);
+        assert!(result.contains("teardown failed"), "got: {}", result);
         assert!(!result.contains("fuzz in"), "got: {}", result);
     }
 }
