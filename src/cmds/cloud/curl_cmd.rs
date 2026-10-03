@@ -17,6 +17,7 @@ use crate::core::utils::resolved_command;
 use anyhow::{Context, Result};
 use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
+use std::process::Stdio;
 
 const MAX_RESPONSE_SIZE: usize = 500;
 
@@ -33,6 +34,11 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         eprintln!("Running: curl -s {}", args.join(" "));
     }
 
+    // Forward our stdin: `Command::output()` gives the child an immediate-EOF
+    // stdin, which empties stdin-based bodies (`-d @-`, `--data-binary @-`,
+    // `-T -`, `-K -`). Mirrors `RunOptions::inherit_stdin` (#4084).
+    cmd.stdin(Stdio::inherit());
+
     // Capture stdout as raw bytes (not UTF-8 String) so binary downloads
     // survive intact. `String::from_utf8_lossy` would otherwise replace
     // every non-UTF-8 byte with U+FFFD (3 bytes), corrupting e.g. gzip
@@ -43,7 +49,9 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     // Skip filtering on failure: curl can return HTML error bodies that would
     // be misleading to summarize, and we want the real exit code surfaced.
     if !output.status.success() {
-        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        // stderr is curl's own diagnostics, which do follow the console code
+        // page. The body on stdout does not — see the note below.
+        let stderr_str = crate::core::utils::decode_process_output(&output.stderr);
         let stdout_str = String::from_utf8_lossy(&output.stdout);
         let msg = if stderr_str.trim().is_empty() {
             stdout_str.trim().to_string()
@@ -72,20 +80,23 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         return Ok(exit_code);
     }
 
+    // Deliberately not `decode_process_output`: a response body is a network
+    // payload whose encoding comes from the HTTP charset, not from the local
+    // console code page, so decoding it as GBK/CP850 would only ever be right
+    // by accident. Anything that is not valid UTF-8 already took the raw
+    // binary passthrough above, so this conversion is lossless in practice.
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
     let is_tty = std::io::stdout().is_terminal();
     let filtered = filter_curl_output(&raw, is_tty);
 
-    println!("{}", filtered.content);
-    if let Some(hint) = &filtered.tee_hint {
-        println!("{}", hint);
-    }
+    let shown =
+        crate::core::runner::emit_guarded(&filtered.content, filtered.tee_hint.as_deref(), &raw);
 
     timer.track(
         &format!("curl {}", args.join(" ")),
         &format!("rtk curl {}", args.join(" ")),
         &raw,
-        &filtered.content,
+        &shown,
     );
 
     Ok(exit_code)
