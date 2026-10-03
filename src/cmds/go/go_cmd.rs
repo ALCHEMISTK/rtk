@@ -296,8 +296,6 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
     let mut packages: HashMap<String, PackageResult> = HashMap::new();
     let mut current_test_output: HashMap<(String, String), Vec<String>> = HashMap::new(); // (package, test) -> outputs
     let mut build_output: HashMap<String, Vec<String>> = HashMap::new(); // import_path -> error lines
-    let mut non_json_lines: Vec<String> = Vec::new();
-
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -306,10 +304,7 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
 
         let event: GoTestEvent = match serde_json::from_str(trimmed) {
             Ok(e) => e,
-            Err(_) => {
-                non_json_lines.push(trimmed.to_string());
-                continue;
-            }
+            Err(_) => continue, // Skip non-JSON lines
         };
 
         // Handle build-output/build-fail events (use ImportPath, no Package)
@@ -410,10 +405,7 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
     let has_failures = total_fail > 0 || total_build_fail > 0 || total_pkg_fail > 0;
 
     if !has_failures && total_pass == 0 {
-        if non_json_lines.is_empty() {
-            return "Go test: No tests found".to_string();
-        }
-        return format_non_json_lines(&non_json_lines);
+        return "Go test: No tests found".to_string();
     }
 
     let total_fuzz = packages
@@ -502,17 +494,6 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
         }
     }
 
-    result.trim().to_string()
-}
-
-fn format_non_json_lines(lines: &[String]) -> String {
-    let mut result = String::from("Go test: error\n");
-    for line in lines.iter().take(CAP_ERRORS) {
-        result.push_str(&format!("{}\n", truncate(line, 120)));
-    }
-    if lines.len() > CAP_ERRORS {
-        result.push_str(&format!("... +{} more lines\n", lines.len() - CAP_ERRORS));
-    }
     result.trim().to_string()
 }
 
@@ -1190,43 +1171,6 @@ utils.go:15:5: unreachable code"#;
     }
 
     #[test]
-    fn test_filter_go_test_non_json_lines_surface_instead_of_no_tests_found() {
-        let output = "error: cannot find package\nsome other error line";
-
-        let result = filter_go_test_json(output);
-
-        assert_eq!(
-            result,
-            "Go test: error\nerror: cannot find package\nsome other error line"
-        );
-    }
-
-    #[test]
-    fn test_filter_go_test_non_json_lines_capped() {
-        let output = (0..25)
-            .map(|i| format!("line {}", i))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let result = filter_go_test_json(&output);
-
-        assert!(result.contains("line 19"));
-        assert!(!result.contains("line 20"));
-        assert!(result.ends_with("... +5 more lines"));
-    }
-
-    #[test]
-    fn test_filter_go_test_non_json_ignored_when_tests_pass() {
-        let output = r#"stray line
-{"Action":"pass","Package":"example.com/foo","Test":"TestA","Elapsed":0.01}
-{"Action":"pass","Package":"example.com/foo","Elapsed":0.02}"#;
-
-        let result = filter_go_test_json(output);
-
-        assert_eq!(result, "Go test: 1 passed in 1 packages");
-    }
-
-    #[test]
     fn test_filter_go_test_fuzz_keeps_last_elapsed_line() {
         let output = r#"{"Action":"start","Package":"example.com/foo"}
 {"Action":"run","Package":"example.com/foo","Test":"FuzzBar"}
@@ -1263,17 +1207,31 @@ utils.go:15:5: unreachable code"#;
     }
 
     #[test]
-    fn test_filter_go_test_fuzz_multi_package_sorted() {
-        let output = r#"{"Action":"output","Package":"example.com/b","Test":"FuzzB","Output":"fuzz: elapsed: 2s, execs: 20\n"}
-{"Action":"pass","Package":"example.com/b","Test":"FuzzB","Elapsed":2.0}
-{"Action":"output","Package":"example.com/a","Test":"FuzzA","Output":"fuzz: elapsed: 1s, execs: 10\n"}
-{"Action":"pass","Package":"example.com/a","Test":"FuzzA","Elapsed":1.0}"#;
+    fn test_filter_go_test_failing_fuzz_reports_failure_not_fuzz_summary() {
+        let output = r#"{"Action":"start","Package":"example.com/foo"}
+{"Action":"run","Package":"example.com/foo","Test":"FuzzRev"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"=== RUN   FuzzRev\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"fuzz: elapsed: 0s, gathering baseline coverage: 0/3 completed\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"fuzz: elapsed: 0s, execs: 1234 (12345/sec), new interesting: 1 (total: 4)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"--- FAIL: FuzzRev (0.11s)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"    --- FAIL: FuzzRev (0.00s)\n"}
+{"Action":"output","Package":"example.com/foo","Test":"FuzzRev","Output":"        rev_test.go:17: Reverse produced invalid UTF-8 string \"\\x9c\"\n"}
+{"Action":"fail","Package":"example.com/foo","Test":"FuzzRev","Elapsed":0.11}
+{"Action":"output","Package":"example.com/foo","Output":"FAIL\n"}
+{"Action":"fail","Package":"example.com/foo","Elapsed":0.12}"#;
 
         let result = filter_go_test_json(output);
 
-        assert_eq!(
-            result,
-            "Go test: 2 passed, 2 fuzz in 2 packages\na\n  fuzz: elapsed: 1s, execs: 10\nb\n  fuzz: elapsed: 2s, execs: 20"
+        assert!(
+            result.starts_with("Go test: 0 passed, 1 failed"),
+            "got: {}",
+            result
         );
+        assert!(
+            result.contains("Reverse produced invalid UTF-8"),
+            "got: {}",
+            result
+        );
+        assert!(!result.contains("fuzz in"), "got: {}", result);
     }
 }
