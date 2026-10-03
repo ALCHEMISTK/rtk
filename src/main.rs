@@ -3443,6 +3443,7 @@ fn is_operational_command(cmd: &Commands) -> bool {
             | Commands::Rg { .. }
             | Commands::AstGrep { .. }
             | Commands::Wget { .. }
+            | Commands::Jest { .. }
             | Commands::Vitest { .. }
             | Commands::Ctest { .. }
             | Commands::Prisma { .. }
@@ -3487,6 +3488,15 @@ mod tests {
     use crate::core::test_isolation;
     use clap::Parser;
     use std::cell::Cell;
+
+    #[test]
+    fn test_jest_and_vitest_get_the_hook_integrity_check() {
+        for framework in ["jest", "vitest"] {
+            let cli = Cli::try_parse_from(["rtk", framework, "src/a.test.js"])
+                .expect("rtk <framework> <path> parses");
+            assert!(is_operational_command(&cli.command), "{framework}");
+        }
+    }
 
     #[test]
     fn test_git_commit_single_message() {
